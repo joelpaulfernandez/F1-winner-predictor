@@ -1,0 +1,24 @@
+# Core Web Framework
+fastapi==0.115.2
+uvicorn==0.30.6
+jinja2==3.1.4
+
+# Data Handling & ML
+pandas==2.2.3
+numpy==1.26.4
+scikit-learn==1.5.2
+xgboost==2.1.1
+lightgbm==4.3.0
+joblib==1.4.2
+
+# F1 Data Fetching
+fastf1==3.4.3
+requests==2.32.3
+
+# Visualization (Optional)
+matplotlib==3.9.2
+plotly==5.24.1
+
+# Other Utilities
+python-dotenv==1.0.1
+tqdm==4.66.5

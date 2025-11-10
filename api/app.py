@@ -4,6 +4,7 @@ import numpy as np
 import pandas as pd
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 # Reuse all the logic from predict_live.py so the API matches the CLI
 from predict_live import (
@@ -19,6 +20,10 @@ app = FastAPI(
     title="F1 Live Winner Predictor",
     description="Predict win probabilities from a live F1 grid CSV using the same logic as predict_live.py.",
 )
+
+# Serve static files (e.g., live.html) from api/static
+STATIC_DIR = Path(__file__).parent / "static"
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 # Allow local frontends; you can lock this down later
 app.add_middleware(

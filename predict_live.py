@@ -515,8 +515,20 @@ def main():
         names = make_name_lookup(rr)
         out = out.merge(names, on="driver_id", how="left")
     else:
+        # If we don't have the history parquet, just use raw IDs as names
         out["driver_name"] = out["driver_id"].astype(str)
         out["team_label"] = out["team_id"].astype(str)
+
+    # Fallbacks in case the lookup didn't have entries for new drivers/teams
+    if "driver_name" not in out.columns:
+        out["driver_name"] = out["driver_id"].astype(str)
+    else:
+        out["driver_name"] = out["driver_name"].fillna(out["driver_id"].astype(str))
+
+    if "team_label" not in out.columns:
+        out["team_label"] = out["team_id"].astype(str)
+    else:
+        out["team_label"] = out["team_label"].fillna(out["team_id"])
 
     # Save + preview
     Path(args.out).parent.mkdir(parents=True, exist_ok=True)
