@@ -1,0 +1,43 @@
+# Python	
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.sqlite3
+*.db
+*.log
+.env
+.venv/
+venv/
+.ipynb_checkpoints/
+
+# Data (keep only small CSVs if needed)
+data/raw/
+data/gold/
+data/silver/
+data/live_inputs/
+data_cache/
+*.sqlite
+*.parquet
+*.csv
+
+# Exception: allow small CSVs under 1MB if needed
+!data/ref/*.csv
+
+# Cache
+*.pkl
+*.joblib
+*.npy
+*.npz
+fastf1_http_cache.sqlite
+*.feather
+
+# macOS / IDE
+.DS_Store
+.vscode/
+.idea/
+
+# Jupyter / Reports
+*.ipynb
+reports/
+notebooks/

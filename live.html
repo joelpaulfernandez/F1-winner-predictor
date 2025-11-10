@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>F1 Live Winner Predictor</title>
+  <style>
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+      max-width: 960px;
+      margin: 2rem auto;
+      padding: 0 1rem;
+    }
+    h1 { margin-bottom: 0.5rem; }
+    form { margin-bottom: 1rem; display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem 1.5rem; align-items: center; }
+    label { font-size: 0.85rem; font-weight: 600; display: block; margin-bottom: 0.25rem; }
+    input[type="text"], input[type="number"] {
+      width: 100%;
+      padding: 0.35rem 0.5rem;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      font: inherit;
+    }
+    select {
+      width: 100%;
+      padding: 0.35rem 0.5rem;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      font: inherit;
+      background: #fff;
+    }
+    button {
+      grid-column: 1 / -1;
+      padding: 0.5rem 0.75rem;
+      border: none;
+      border-radius: 4px;
+      font: inherit;
+      cursor: pointer;
+    }
+    button#fetchBtn { background: #111827; color: #fff; }
+    button#fetchBtn:disabled { opacity: 0.6; cursor: default; }
+    #status { margin: 0.5rem 0 0.75rem; font-size: 0.85rem; color: #4b5563; }
+    table {
+      border-collapse: collapse;
+      width: 100%;
+      margin-top: 0.5rem;
+      font-size: 0.9rem;
+    }
+    th, td {
+      border: 1px solid #e5e7eb;
+      padding: 0.4rem 0.5rem;
+      text-align: left;
+    }
+    th { background: #f3f4f6; }
+    tbody tr:nth-child(even) { background: #f9fafb; }
+  </style>
+</head>
+<body>
+  <h1>F1 Live Winner Predictor</h1>
+  <p>Select a year and race (or enter a custom CSV path), then fetch win probabilities from your FastAPI backend.</p>
+
+  <form id="paramsForm">
+    <div>
+      <label for="yearSelect">Year</label>
+      <select id="yearSelect">
+        <option value="">Loading years...</option>
+      </select>
+    </div>
+    <div>
+      <label for="raceSelect">Race</label>
+      <select id="raceSelect">
+        <option value="">Select a year first...</option>
+      </select>
+    </div>
+    <div>
+      <label for="raceId">Race ID</label>
+      <input id="raceId" type="text" value="2024_1" />
+    </div>
+    <div>
+      <label for="eventName">Event name</label>
+      <input id="eventName" type="text" value="Bahrain Grand Prix" />
+    </div>
+    <div>
+      <label for="csvPath">CSV path (relative to project)</label>
+      <input id="csvPath" type="text" value="data/live_inputs/bahrain_2024.csv" />
+    </div>
+    <div>
+      <label for="topN">Top N</label>
+      <input id="topN" type="number" min="1" max="20" value="12" />
+    </div>
+    <button id="fetchBtn" type="submit">Get predictions</button>
+  </form>
+
+  <div id="status"></div>
+
+  <table id="resultsTable" style="display:none;">
+    <thead>
+      <tr>
+        <th>#</th>
+        <th>Driver</th>
+        <th>Team</th>
+        <th>Win prob</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+
+  <script>
+    const API_BASE = "http://127.0.0.1:8000";
+
+    const form = document.getElementById("paramsForm");
+    const statusEl = document.getElementById("status");
+    const table = document.getElementById("resultsTable");
+    const tbody = table.querySelector("tbody");
+    const fetchBtn = document.getElementById("fetchBtn");
+
+    const yearSelect = document.getElementById("yearSelect");
+    const raceSelect = document.getElementById("raceSelect");
+    let knownRaces = [];
+    let racesByYear = {};
+
+    async function loadRaces() {
+      try {
+        const res = await fetch(API_BASE + "/live_races");
+        if (!res.ok) {
+          console.warn("Failed to load races:", res.status);
+          yearSelect.innerHTML = '<option value="">Could not load years</option>';
+          raceSelect.innerHTML = '<option value="">No races</option>';
+          return;
+        }
+        const data = await res.json();
+        knownRaces = data.races || [];
+
+        // Group races by year based on race_id prefix (e.g. 2024_1 -> 2024)
+        racesByYear = {};
+        knownRaces.forEach((r, idx) => {
+          let year = null;
+          if (r.race_id && typeof r.race_id === "string" && r.race_id.includes("_")) {
+            const y = parseInt(r.race_id.split("_")[0], 10);
+            if (!isNaN(y)) year = y;
+          }
+          if (year === null && r.csv_path) {
+            const m = String(r.csv_path).match(/(20\d{2})_/);
+            if (m) year = parseInt(m[1], 10);
+          }
+          if (year === null) {
+            year = 0; // unknown bucket
+          }
+          if (!racesByYear[year]) racesByYear[year] = [];
+          racesByYear[year].push({ ...r, index: idx });
+        });
+
+        // Populate year dropdown (descending years, unknown last)
+        const years = Object.keys(racesByYear)
+          .map((y) => parseInt(y, 10))
+          .filter((y) => !isNaN(y))
+          .sort((a, b) => b - a);
+
+        yearSelect.innerHTML = '<option value="">Select year...</option>';
+        years.forEach((y) => {
+          const opt = document.createElement("option");
+          opt.value = String(y);
+          opt.textContent = String(y);
+          yearSelect.appendChild(opt);
+        });
+
+        if (racesByYear[0]) {
+          const opt = document.createElement("option");
+          opt.value = "0";
+          opt.textContent = "Unknown year";
+          yearSelect.appendChild(opt);
+        }
+
+        raceSelect.innerHTML = '<option value="">Select a year first...</option>';
+      } catch (err) {
+        console.error("Error loading races", err);
+        yearSelect.innerHTML = '<option value="">Error loading years</option>';
+        raceSelect.innerHTML = '<option value="">No races</option>';
+      }
+    }
+
+    yearSelect.addEventListener("change", (e) => {
+      const year = e.target.value;
+      if (!year) {
+        raceSelect.innerHTML = '<option value="">Select a year first...</option>';
+        return;
+      }
+      const yearInt = parseInt(year, 10);
+      const list = racesByYear[yearInt] || racesByYear[0] || [];
+      raceSelect.innerHTML = '<option value="">Select race...</option>';
+      list.forEach((r) => {
+        const opt = document.createElement("option");
+        const label = `${r.race_id || "?"} — ${r.eventname || r.csv_path}`;
+        opt.value = String(r.index);
+        opt.textContent = label;
+        raceSelect.appendChild(opt);
+      });
+    });
+
+    raceSelect.addEventListener("change", (e) => {
+      const idx = e.target.value;
+      if (idx === "") return;
+      const r = knownRaces[Number(idx)];
+      if (!r) return;
+      if (r.race_id) document.getElementById("raceId").value = r.race_id;
+      if (r.eventname) document.getElementById("eventName").value = r.eventname;
+      if (r.csv_path) document.getElementById("csvPath").value = r.csv_path;
+    });
+
+    window.addEventListener("load", loadRaces);
+
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+
+      const raceId = document.getElementById("raceId").value.trim();
+      const eventName = document.getElementById("eventName").value.trim();
+      const csvPath = document.getElementById("csvPath").value.trim();
+      const topN = document.getElementById("topN").value || 12;
+
+      if (!raceId || !eventName || !csvPath) {
+        statusEl.textContent = "Please fill in race ID, event name and CSV path.";
+        return;
+      }
+
+      const url = new URL(API_BASE + "/live_predict");
+      url.searchParams.set("race_id", raceId);
+      url.searchParams.set("event_name", eventName);
+      url.searchParams.set("csv_path", csvPath);
+      url.searchParams.set("top", topN);
+
+      statusEl.textContent = "Loading...";
+      fetchBtn.disabled = true;
+
+      try {
+        const res = await fetch(url.toString());
+        if (!res.ok) {
+          const text = await res.text();
+          throw new Error(`HTTP ${res.status}: ${text}`);
+        }
+        const data = await res.json();
+        const drivers = data.drivers || [];
+
+        tbody.innerHTML = "";
+        drivers.forEach((d, idx) => {
+          const tr = document.createElement("tr");
+          const driverName = d.driver_name ?? d.driver_id;
+          const team = d.team_label ?? d.team_id ?? "";
+          const probPct = d.prob_win != null ? (d.prob_win * 100).toFixed(2) + "%" : "";
+
+          tr.innerHTML = `
+            <td>${idx + 1}</td>
+            <td>${driverName}</td>
+            <td>${team}</td>
+            <td>${probPct}</td>
+          `;
+          tbody.appendChild(tr);
+        });
+
+        table.style.display = drivers.length ? "table" : "none";
+        statusEl.textContent = `Showing ${drivers.length} drivers for ${data.eventname} (${data.race_id}).`;
+      } catch (err) {
+        console.error(err);
+        statusEl.textContent = "Error: " + err.message;
+        table.style.display = "none";
+      } finally {
+        fetchBtn.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>
