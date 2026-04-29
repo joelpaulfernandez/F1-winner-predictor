@@ -1,3 +1,5 @@
+import argparse
+import datetime
 import subprocess
 from pathlib import Path
 
@@ -10,9 +12,19 @@ LIVE_DIR = Path("data/live_inputs")
 
 
 def main():
-    LIVE_DIR.mkdir(parents=True, exist_ok=True)
+    parser = argparse.ArgumentParser(
+        description="Build live-input CSVs for a full F1 season from FastF1."
+    )
+    parser.add_argument(
+        "--year",
+        type=int,
+        default=datetime.date.today().year,
+        help="Season year to build (default: current year)",
+    )
+    args = parser.parse_args()
+    year = args.year
 
-    year = 2025
+    LIVE_DIR.mkdir(parents=True, exist_ok=True)
 
     # Try a reasonable range of rounds; FastF1 will tell us which ones exist.
     for rnd in range(1, 30):
@@ -58,7 +70,7 @@ def main():
             print(f"❌ Failed for {race_id} ({eventname}): {e}")
             continue
 
-    print("Done building 2025 live inputs.")
+    print(f"Done building {year} live inputs.")
 
 
 if __name__ == "__main__":

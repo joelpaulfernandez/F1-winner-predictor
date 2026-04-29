@@ -5,6 +5,7 @@ import pandas as pd
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 
 # Reuse all the logic from predict_live.py so the API matches the CLI
 from predict_live import (
@@ -100,11 +101,29 @@ def _build_live_features(race_id: str, event_name: str, csv_path: Path) -> pd.Da
     live["raceid"] = race_id
     live["eventname"] = event_name
 
+    # Save live CSV team strings BEFORE rollup coerces them to numeric
+    live_team_map = None
+    if "team_id" in live.columns:
+        live_team_map = (
+            live[["driver_id", "team_id"]]
+            .copy()
+            .dropna(subset=["team_id"])
+            .rename(columns={"team_id": "team_live"})
+        )
+        live_team_map["driver_id"] = pd.to_numeric(live_team_map["driver_id"], errors="coerce")
+        live_team_map = live_team_map.dropna(subset=["driver_id"])
+
     # Enrich with history
     feat = add_rollups_from_history(live)
 
-    # Ensure team_id present for output; try to backfill from history if missing
-    if "team_id" not in feat.columns or feat["team_id"].isna().all():
+    # Restore team from live CSV (always more current than historical backfill)
+    if live_team_map is not None and not live_team_map.empty:
+        feat["driver_id"] = pd.to_numeric(feat["driver_id"], errors="coerce")
+        feat = feat.merge(live_team_map, on="driver_id", how="left")
+        feat["team_id"] = feat["team_live"].fillna(feat.get("team_id", pd.NA))
+        feat = feat.drop(columns=["team_live"], errors="ignore")
+    elif "team_id" not in feat.columns or feat["team_id"].isna().all():
+        # Fallback: backfill from history only if live CSV had no team data
         try:
             if SILVER_RR_PATH.exists():
                 rr = pd.read_parquet(SILVER_RR_PATH)
@@ -114,19 +133,11 @@ def _build_live_features(race_id: str, event_name: str, csv_path: Path) -> pd.Da
                     .tail(1)[["driver_id", "team_id"]]
                     .drop_duplicates()
                 )
-                feat = feat.merge(
-                    team_map,
-                    on="driver_id",
-                    how="left",
-                    suffixes=("", "_from_hist"),
-                )
+                feat = feat.merge(team_map, on="driver_id", how="left", suffixes=("", "_from_hist"))
                 if "team_id_from_hist" in feat.columns:
                     feat["team_id"] = feat["team_id"].fillna(feat["team_id_from_hist"])
-                    feat = feat.drop(
-                        columns=[c for c in ["team_id_from_hist"] if c in feat.columns]
-                    )
+                    feat = feat.drop(columns=["team_id_from_hist"], errors="ignore")
         except Exception:
-            # If history lookup fails, just proceed with what we have
             pass
         if "team_id" not in feat.columns:
             feat["team_id"] = pd.NA
@@ -148,14 +159,25 @@ def _compute_probs(feat: pd.DataFrame, top: int) -> pd.DataFrame:
         "sum"
     ).replace(0, 1)
 
-    # Attach names/team label (same as CLI)
-    if SILVER_RR_PATH.exists():
+    # Attach names — prefer current-season lookup over historical silver
+    driver_names_path = Path("data/ref/driver_names.parquet")
+    if driver_names_path.exists():
+        dn = pd.read_parquet(driver_names_path)
+        dn["driver_id"] = pd.to_numeric(dn["driver_id"], errors="coerce")
+        out["driver_id"] = pd.to_numeric(out["driver_id"], errors="coerce")
+        out = out.merge(dn[["driver_id", "driver_name"]], on="driver_id", how="left")
+    elif SILVER_RR_PATH.exists():
         rr = pd.read_parquet(SILVER_RR_PATH)
         names = make_name_lookup(rr)
         out = out.merge(names, on="driver_id", how="left")
-    else:
-        out["driver_name"] = out["driver_id"].astype(str)
+
+    # Use live team_id as team_label (already restored to current-season string)
+    if "team_label" not in out.columns:
         out["team_label"] = out["team_id"].astype(str)
+    out["team_label"] = out["team_label"].fillna(out["team_id"].astype(str))
+
+    if "driver_name" not in out.columns:
+        out["driver_name"] = out["driver_id"].astype(str)
 
     save_cols = [
         "raceid",
@@ -227,9 +249,9 @@ async def live_predict(
     Predict win probabilities from a live grid CSV.
 
     Query parameters:
-    - race_id: e.g. "2024_1"
+    - race_id: e.g. "2026_1"
     - event_name: e.g. "Bahrain Grand Prix"
-    - csv_path: path to a CSV like data/live_inputs/bahrain_2024.csv
+    - csv_path: path to a CSV like data/live_inputs/2026_1.csv
     - top: how many drivers to return (default 12)
     """
     try:
@@ -261,3 +283,28 @@ async def live_predict(
         "top": top,
         "drivers": records,
     }
+
+
+# ---------------------------------------------------------------------------
+# AI Agent endpoint
+# ---------------------------------------------------------------------------
+
+class AgentQuery(BaseModel):
+    question: str
+
+
+@app.post("/agent/predict")
+async def agent_predict(body: AgentQuery):
+    """Run the AI agent for a natural-language F1 race query.
+
+    Request body: {"question": "Who will win the 2025 Monaco Grand Prix?"}
+
+    The agent lists available races, runs the LightGBM model, and returns
+    a plain-English race preview. Requires ANTHROPIC_API_KEY in the environment.
+    """
+    try:
+        from agent.agent import run_agent  # lazy import — keeps startup fast
+        answer = run_agent(body.question)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+    return {"answer": answer}

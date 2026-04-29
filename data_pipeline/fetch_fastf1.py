@@ -1,10 +1,16 @@
+import argparse
 import fastf1
 import pandas as pd
 from pathlib import Path
 
 fastf1.Cache.enable_cache('data_cache')
 
-YEARS = [2022, 2023, 2024]
+parser = argparse.ArgumentParser(description="Fetch F1 race results via FastF1.")
+parser.add_argument("--years", nargs="+", type=int, default=[2022, 2023, 2024, 2025, 2026],
+                    help="Season years to fetch (default: 2022-2026)")
+args, _ = parser.parse_known_args()
+
+YEARS = args.years
 all_rows = []
 
 for year in YEARS:

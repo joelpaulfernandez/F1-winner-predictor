@@ -22,3 +22,25 @@ plotly==5.24.1
 # Other Utilities
 python-dotenv==1.0.1
 tqdm==4.66.5
+
+# AI Agent Layer
+langchain-groq>=0.2.0
+langchain-core>=0.3.0
+langgraph>=0.3.0
+langchain-community>=0.2.0
+
+# PyTorch MLP (CPU build — swap for torch+cu118 on GPU)
+torch>=2.0.0
+torchvision>=0.15.0
+
+# Hugging Face transformers (race commentary)
+transformers>=4.40.0
+sentencepiece>=0.1.99
+accelerate>=0.27.0
+
+# Sentence embeddings (pgvector store)
+sentence-transformers>=3.0.0
+
+# pgvector / PostgreSQL vector store
+pgvector>=0.3.0
+psycopg2-binary>=2.9.0
